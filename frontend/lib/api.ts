@@ -1,5 +1,5 @@
 export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000"
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1"
 
 export type UploadResponse = {
   job_id: string
@@ -53,7 +53,7 @@ export async function uploadPdf(
   form.append("file", file, file.name)
   form.append("options", JSON.stringify(options))
 
-  const response = await fetch(`${API_BASE}/api/v1/jobs`, {
+  const response = await fetch(`${API_BASE}/jobs`, {
     method: "POST",
     body: form,
   })
@@ -67,7 +67,7 @@ export async function uploadPdf(
 }
 
 export async function fetchResult(jobId: string): Promise<RemediationResult> {
-  const response = await fetch(`${API_BASE}/api/v1/jobs/${jobId}/result`)
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/result`)
   if (!response.ok) {
     const message = await readError(response)
     throw new Error(message)
@@ -76,9 +76,9 @@ export async function fetchResult(jobId: string): Promise<RemediationResult> {
 }
 
 export function downloadUrl(jobId: string): string {
-  return `${API_BASE}/api/v1/jobs/${jobId}/download`
+  return `${API_BASE}/jobs/${jobId}/download`
 }
 
 export function sseUrl(jobId: string): string {
-  return `${API_BASE}/api/v1/jobs/${jobId}/progress`
+  return `${API_BASE}/jobs/${jobId}/progress`
 }

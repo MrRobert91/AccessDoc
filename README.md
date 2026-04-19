@@ -52,18 +52,31 @@ Next.js 15 → FastAPI → Gemma 4 (OpenRouter) → pikepdf → veraPDF
 # Backend
 cd backend
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt -r requirements-dev.txt
-uvicorn app.main:app --reload
+pip install -r requirements.txt
+OPENROUTER_API_KEY=... uvicorn app.main:app --reload
 
 # Frontend
 cd frontend
 npm install
-npm run dev
+npm run dev    # http://localhost:3000
 
 # Tests
-cd backend && pytest tests/ -v
-cd frontend && npm test
+cd backend && OPENROUTER_API_KEY=test pytest -q    # 76 tests
+cd frontend && npm test                             # 16 tests
 ```
+
+### Environment variables
+
+Backend:
+- `OPENROUTER_API_KEY` (required)
+- `GEMMA_MODEL_ACCURATE`, `GEMMA_MODEL_FAST`
+- `MAX_FILE_SIZE_MB`, `JOB_TTL_HOURS`
+- `VERAPDF_PATH`, `TMP_DIR`
+- `CORS_ORIGINS` (JSON array)
+
+Frontend:
+- `NEXT_PUBLIC_API_URL` — full base including `/api/v1`
+  (e.g. `http://localhost:8000/api/v1`)
 
 ## License
 
