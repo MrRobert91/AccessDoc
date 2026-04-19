@@ -49,6 +49,9 @@ yarn-error.log*
 backend/tmp/
 *.pdf.bak
 
+# Generated test fixtures (created by tests/fixtures/generate_fixtures.py)
+backend/tests/fixtures/*.pdf
+
 # Test artifacts
 coverage/
 .nyc_output/
