@@ -1,9 +1,13 @@
+import asyncio
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import os
 
 from app.config import settings
+from app.routers import downloads, health, jobs
+from app.utils.file_manager import file_manager
 from app.utils.logging import setup_logging
 
 
@@ -11,7 +15,15 @@ from app.utils.logging import setup_logging
 async def lifespan(app: FastAPI):
     setup_logging()
     os.makedirs(settings.tmp_dir, exist_ok=True)
-    yield
+    cleanup_task = asyncio.create_task(file_manager.cleanup_loop())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(
@@ -30,6 +42,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(health.router, prefix="/api/v1")
+app.include_router(jobs.router, prefix="/api/v1")
+app.include_router(downloads.router, prefix="/api/v1")
 
 
 @app.get("/api/v1/ping")
