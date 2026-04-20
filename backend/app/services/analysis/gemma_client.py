@@ -1,8 +1,10 @@
+import asyncio
 import base64
 import json
 
+import httpx
 import structlog
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, APIConnectionError, APITimeoutError
 
 from app.config import settings
 
@@ -43,6 +45,8 @@ QUALITY PRINCIPLES:
 
 
 class GemmaClient:
+    _RETRY_DELAYS = [4, 8, 16]  # seconds between attempts (3 retries after initial)
+
     def __init__(self, model_size: str = "accurate"):
         self.client = AsyncOpenAI(
             api_key=settings.openrouter_api_key,
@@ -51,12 +55,38 @@ class GemmaClient:
                 "HTTP-Referer": "https://accessdoc.app",
                 "X-Title": "AccessDoc - PDF Accessibility",
             },
+            timeout=httpx.Timeout(
+                connect=30.0,
+                read=settings.api_read_timeout,
+                write=30.0,
+                pool=30.0,
+            ),
+            max_retries=0,  # retries handled manually with backoff
         )
         self.model_name = (
             settings.gemma_model_accurate
             if model_size == "accurate"
             else settings.gemma_model_fast
         )
+
+    async def _request_with_retry(self, **kwargs) -> str:
+        """Call OpenRouter API with exponential backoff on stream/timeout errors."""
+        last_exc: Exception | None = None
+        for attempt in range(len(self._RETRY_DELAYS) + 1):
+            try:
+                response = await self.client.chat.completions.create(**kwargs)
+                return response.choices[0].message.content or ""
+            except (APITimeoutError, APIConnectionError) as exc:
+                last_exc = exc
+                log.warning(
+                    "gemma_stream_timeout_retry",
+                    attempt=attempt + 1,
+                    max_attempts=len(self._RETRY_DELAYS) + 1,
+                    error=str(exc),
+                )
+                if attempt < len(self._RETRY_DELAYS):
+                    await asyncio.sleep(self._RETRY_DELAYS[attempt])
+        raise last_exc  # type: ignore[misc]
 
     async def analyze_page_structure(
         self,
@@ -96,7 +126,7 @@ Respond with this exact JSON structure:
 """.strip()
 
         try:
-            response = await self.client.chat.completions.create(
+            raw = await self._request_with_retry(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": STRUCTURE_SYSTEM_PROMPT},
@@ -122,7 +152,6 @@ Respond with this exact JSON structure:
             log.warning("gemma_request_failed", page=page_num, error=str(e))
             return {"page_num": page_num, "language": "es", "blocks": []}
 
-        raw = response.choices[0].message.content or ""
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
@@ -147,7 +176,7 @@ If informative, generate appropriate descriptive alt text.
 """.strip()
 
         try:
-            response = await self.client.chat.completions.create(
+            content = await self._request_with_retry(
                 model=self.model_name,
                 messages=[
                     {"role": "system", "content": ALT_TEXT_SYSTEM_PROMPT},
@@ -172,7 +201,6 @@ If informative, generate appropriate descriptive alt text.
             log.warning("alt_text_request_failed", error=str(e))
             return "decorative"
 
-        content = response.choices[0].message.content or ""
         return content.strip()
 
     async def fix_accessibility_issues(
@@ -198,7 +226,7 @@ Respond ONLY with the corrected structure JSON.
 """.strip()
 
         try:
-            response = await self.client.chat.completions.create(
+            raw = await self._request_with_retry(
                 model=self.model_name,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.1,
@@ -210,6 +238,6 @@ Respond ONLY with the corrected structure JSON.
             return document_structure
 
         try:
-            return json.loads(response.choices[0].message.content or "")
+            return json.loads(raw)
         except json.JSONDecodeError:
             return document_structure

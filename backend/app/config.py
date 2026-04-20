@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     gemma_model_accurate: str = "google/gemma-4-31b-it:free"
     gemma_model_fast: str = "google/gemma-4-26b-a4b-it:free"
+    api_read_timeout: float = 120.0  # seconds to wait for tokens from OpenRouter
     max_file_size_mb: int = 50
     job_ttl_hours: int = 1
     max_concurrent_jobs: int = 5
