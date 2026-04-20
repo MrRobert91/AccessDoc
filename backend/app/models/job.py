@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
+
 from app.config import settings
+from app.models.activity import ActivityEvent
 
 
 @dataclass
@@ -29,6 +31,8 @@ class Job:
     accessible_pdf_path: Optional[str] = None
     error_code: Optional[str] = None
     error_message: Optional[str] = None
+    activity: list[ActivityEvent] = field(default_factory=list)
+    activity_cursor: int = 0
 
     @property
     def status(self) -> str:

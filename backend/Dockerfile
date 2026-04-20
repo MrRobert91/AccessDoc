@@ -5,6 +5,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-spa \
     tesseract-ocr-eng \
+    ghostscript \
+    qpdf \
+    unpaper \
+    pngquant \
     openjdk-21-jre-headless \
     curl \
     unzip \

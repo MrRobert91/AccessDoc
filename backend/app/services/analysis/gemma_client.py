@@ -81,7 +81,7 @@ Respond with this exact JSON structure:
   "blocks": [
     {{
       "id": "p{page_num}_b0",
-      "role": "H1|H2|H3|P|Figure|Table|L|LI|LBody|Caption|Artifact|...",
+      "role": "H1|H2|H3|P|Figure|Table|L|Caption|Artifact|...",
       "text": "block text content",
       "level": 1,
       "is_decorative": false,
@@ -89,10 +89,19 @@ Respond with this exact JSON structure:
       "surrounding_text": "nearby text for context",
       "reading_order_position": 0,
       "was_changed": true,
-      "confidence": 0.95
+      "confidence": 0.95,
+      "items": [
+        {{"label": "•", "body": "first list item text"}},
+        {{"label": "2.", "body": "second list item text"}}
+      ]
     }}
   ]
 }}
+
+IMPORTANT on lists (role="L"):
+- Always return an "items" array. Each item MUST have "label" (bullet or number marker, e.g. "•", "-", "1.", "a)") and "body" (the item text without the marker).
+- If the list is unnumbered, use "•" for every label.
+- Do NOT emit children blocks with role="LI"/"LBody" — the items array is the single source of truth for list content.
 """.strip()
 
         try:

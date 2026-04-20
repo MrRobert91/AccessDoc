@@ -11,6 +11,12 @@ class BlockChange:
     before: Optional[str] = None
     after: Optional[str] = None
     confidence: float = 1.0
+    bbox: Optional[tuple[float, float, float, float]] = None
+    role: Optional[str] = None
+    mcid: Optional[int] = None
+    wcag_level: Optional[str] = None
+    pdfua_rule: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 @dataclass

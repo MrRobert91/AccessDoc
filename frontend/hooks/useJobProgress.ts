@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { sseUrl } from "@/lib/api"
+import { sseUrl, type ActivityEvent } from "@/lib/api"
 
 export type ProgressState = {
   status: string
@@ -12,6 +12,9 @@ export type ProgressState = {
   terminal: boolean
   error: string | null
   resultUrl: string | null
+  reportUrl: string | null
+  activity: ActivityEvent[]
+  lastSeq: number
 }
 
 const INITIAL: ProgressState = {
@@ -23,9 +26,14 @@ const INITIAL: ProgressState = {
   terminal: false,
   error: null,
   resultUrl: null,
+  reportUrl: null,
+  activity: [],
+  lastSeq: -1,
 }
 
-type ProgressEvent = {
+const MAX_BUFFER = 2000
+
+type ProgressEventData = {
   status?: string
   progress_pct?: number
   current_step?: string
@@ -33,7 +41,7 @@ type ProgressEvent = {
   pages_total?: number | null
 }
 
-type CompletedEvent = { result_url?: string }
+type CompletedEvent = { result_url?: string; report_url?: string }
 type FailedEvent = { error_code?: string; message?: string }
 
 export function useJobProgress(jobId: string | null) {
@@ -46,7 +54,7 @@ export function useJobProgress(jobId: string | null) {
     sourceRef.current = source
 
     source.addEventListener("progress", (event) => {
-      const data = JSON.parse((event as MessageEvent).data) as ProgressEvent
+      const data = JSON.parse((event as MessageEvent).data) as ProgressEventData
       setState((prev) => ({
         ...prev,
         status: data.status ?? prev.status,
@@ -61,6 +69,22 @@ export function useJobProgress(jobId: string | null) {
       }))
     })
 
+    source.addEventListener("activity", (event) => {
+      const msg = event as MessageEvent
+      try {
+        const data = JSON.parse(msg.data) as ActivityEvent
+        setState((prev) => {
+          if (data.seq <= prev.lastSeq) return prev
+          const nextBuf = prev.activity.length >= MAX_BUFFER
+            ? [...prev.activity.slice(prev.activity.length - MAX_BUFFER + 1), data]
+            : [...prev.activity, data]
+          return { ...prev, activity: nextBuf, lastSeq: data.seq }
+        })
+      } catch {
+        // ignore malformed event
+      }
+    })
+
     source.addEventListener("completed", (event) => {
       const data = JSON.parse((event as MessageEvent).data) as CompletedEvent
       setState((prev) => ({
@@ -70,6 +94,7 @@ export function useJobProgress(jobId: string | null) {
         currentStep: "Completado",
         terminal: true,
         resultUrl: data.result_url ?? null,
+        reportUrl: data.report_url ?? null,
       }))
       source.close()
     })

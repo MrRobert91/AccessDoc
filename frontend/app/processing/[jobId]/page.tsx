@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
+import { LiveActivityPanel } from "@/components/LiveActivityPanel"
 import { useJobProgress } from "@/hooks/useJobProgress"
 
 export default function ProcessingPage() {
@@ -21,13 +22,13 @@ export default function ProcessingPage() {
       id="main-content"
       className="min-h-screen bg-slate-50 px-4 py-16"
     >
-      <div className="mx-auto max-w-xl">
+      <div className="mx-auto max-w-4xl">
         <h1 className="text-2xl font-bold text-slate-900">
           Procesando tu documento
         </h1>
         <p className="mt-2 text-sm text-slate-600">
-          Este proceso puede tardar entre 30 segundos y unos minutos según el
-          tamaño del archivo.
+          Cada acción se narra en vivo debajo. Puedes seguir el progreso o
+          filtrar por fase mientras el pipeline trabaja.
         </p>
 
         <div className="mt-8 rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200">
@@ -57,6 +58,10 @@ export default function ProcessingPage() {
               Páginas procesadas: {progress.pagesProcessed} / {progress.pagesTotal}
             </p>
           )}
+        </div>
+
+        <div className="mt-6">
+          <LiveActivityPanel events={progress.activity} />
         </div>
 
         {progress.status === "failed" && (

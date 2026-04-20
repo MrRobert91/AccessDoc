@@ -6,7 +6,22 @@ export type UploadResponse = {
   status: string
   estimated_seconds: number
   sse_url: string
+  activity_url?: string
+  report_url?: string
   expires_at: string
+}
+
+export type ActivityEvent = {
+  seq: number
+  job_id: string
+  phase: string
+  code: string
+  message: string
+  level: "info" | "warn" | "error"
+  page: number | null
+  duration_ms: number | null
+  details: Record<string, unknown> | null
+  ts: string
 }
 
 export type RemediationResult = {
@@ -16,14 +31,48 @@ export type RemediationResult = {
   page_count: number
   before_score: { overall: number; pdfua1_compliant?: boolean; wcag21_aa_compliant?: boolean }
   after_score: { overall: number; pdfua1_compliant?: boolean; wcag21_aa_compliant?: boolean }
-  changes_applied?: Array<{ block_id: string; page: number; change_type: string; wcag_reference?: string }>
+  changes_applied?: Array<{ block_id: string; page_num?: number; page?: number; change_type: string; criterion?: string; wcag_reference?: string; before?: string; after?: string; confidence?: number; role?: string; mcid?: number; pdfua_rule?: string }>
   changes_summary?: Record<string, number>
-  remaining_issues?: Array<{ rule: string; severity: string; description: string }>
+  remaining_issues?: Array<{ rule?: string; criterion?: string; severity: string; description: string; count?: number }>
   download_url: string
   report_url: string
   processed_at?: string
   processing_time_seconds?: number
   model_used?: string
+}
+
+export type BlockChangeEntry = {
+  block_id: string
+  page_num?: number
+  change_type: string
+  criterion?: string
+  before?: string
+  after?: string
+  confidence?: number
+  role?: string
+  mcid?: number
+  pdfua_rule?: string
+  wcag_level?: string
+}
+
+export type RemediationReport = {
+  job_id: string
+  filename?: string
+  status: string
+  processed_at?: string
+  processing_time_seconds?: number
+  page_count: number
+  model_used?: string
+  scores: {
+    before?: { overall?: number; pdfua1_compliant?: boolean; wcag21_aa_compliant?: boolean; criteria_scores?: Record<string, number> }
+    after?: { overall?: number; pdfua1_compliant?: boolean; wcag21_aa_compliant?: boolean; criteria_scores?: Record<string, number> }
+  }
+  changes_by_page: Record<string, BlockChangeEntry[]>
+  changes_by_criterion: Record<string, BlockChangeEntry[]>
+  changes_summary: Record<string, number>
+  remaining_issues: Array<{ criterion?: string; severity: string; description: string; count?: number }>
+  activity_log: ActivityEvent[]
+  download_url: string
 }
 
 type ApiErrorDetail = {
@@ -73,6 +122,15 @@ export async function fetchResult(jobId: string): Promise<RemediationResult> {
     throw new Error(message)
   }
   return (await response.json()) as RemediationResult
+}
+
+export async function fetchReport(jobId: string): Promise<RemediationReport> {
+  const response = await fetch(`${API_BASE}/jobs/${jobId}/report`)
+  if (!response.ok) {
+    const message = await readError(response)
+    throw new Error(message)
+  }
+  return (await response.json()) as RemediationReport
 }
 
 export function downloadUrl(jobId: string): string {

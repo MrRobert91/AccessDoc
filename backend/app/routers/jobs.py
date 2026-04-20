@@ -4,12 +4,14 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.services.job_store import job_store
+from app.services.observability.activity_logger import activity
 from app.services.pipeline import AccessibilityPipeline
+from app.services.reporting.report_builder import report_builder
 
 router = APIRouter(tags=["Jobs"])
 pipeline = AccessibilityPipeline()
@@ -70,12 +72,14 @@ async def create_job(
         "status": "pending",
         "estimated_seconds": _estimate_seconds(len(content)),
         "sse_url": f"/api/v1/jobs/{job_id}/progress",
+        "activity_url": f"/api/v1/jobs/{job_id}/activity",
+        "report_url": f"/api/v1/jobs/{job_id}/report",
         "expires_at": job.expires_at.isoformat(),
     }
 
 
 @router.get("/jobs/{job_id}/progress")
-async def get_job_progress(job_id: str):
+async def get_job_progress(job_id: str, request: Request):
     if not job_store.exists(job_id):
         raise HTTPException(404, detail={
             "error_code": "JOB_NOT_FOUND",
@@ -83,46 +87,78 @@ async def get_job_progress(job_id: str):
             "timestamp": _now(),
         })
 
+    last_event_header = request.headers.get("last-event-id")
+    try:
+        last_event_id = int(last_event_header) if last_event_header else -1
+    except ValueError:
+        last_event_id = -1
+
+    queue = activity.subscribe(job_id)
+
     async def event_stream():
         last_pct = -1
-        while True:
-            job = job_store.get(job_id)
-            if not job:
-                yield _sse("failed", {
-                    "job_id": job_id,
-                    "error_code": "JOB_EXPIRED",
-                    "message": "El job ha expirado",
-                })
-                break
+        try:
+            # Replay missed events since reconnect cursor
+            if last_event_id >= 0:
+                backlog = activity.events_since(job_id, last_event_id)
+                for ev in backlog:
+                    yield _sse_activity(ev)
 
-            if job.progress.progress_pct != last_pct:
-                last_pct = job.progress.progress_pct
-                yield _sse("progress", {
-                    "job_id": job_id,
-                    "status": job.status,
-                    "progress_pct": job.progress.progress_pct,
-                    "current_step": job.progress.current_step,
-                    "pages_processed": job.progress.pages_processed,
-                    "pages_total": job.progress.pages_total,
-                    "timestamp": job.progress.updated_at.isoformat(),
-                })
+            while True:
+                if await request.is_disconnected():
+                    break
 
-            if job.status == "completed":
-                yield _sse("completed", {
-                    "job_id": job_id,
-                    "result_url": f"/api/v1/jobs/{job_id}/result",
-                })
-                break
+                job = job_store.get(job_id)
+                if not job:
+                    yield _sse("failed", {
+                        "job_id": job_id,
+                        "error_code": "JOB_EXPIRED",
+                        "message": "El job ha expirado",
+                    })
+                    break
 
-            if job.status == "failed":
-                yield _sse("failed", {
-                    "job_id": job_id,
-                    "error_code": job.error_code or "INTERNAL_ERROR",
-                    "message": job.error_message or "Error interno",
-                })
-                break
+                if job.progress.progress_pct != last_pct:
+                    last_pct = job.progress.progress_pct
+                    yield _sse("progress", {
+                        "job_id": job_id,
+                        "status": job.status,
+                        "progress_pct": job.progress.progress_pct,
+                        "current_step": job.progress.current_step,
+                        "pages_processed": job.progress.pages_processed,
+                        "pages_total": job.progress.pages_total,
+                        "timestamp": job.progress.updated_at.isoformat(),
+                    })
 
-            await asyncio.sleep(1.5)
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=1.0)
+                    yield _sse_activity(event)
+                    # Drain burst without blocking
+                    for _ in range(20):
+                        try:
+                            ev = queue.get_nowait()
+                            yield _sse_activity(ev)
+                        except asyncio.QueueEmpty:
+                            break
+                except asyncio.TimeoutError:
+                    pass
+
+                if job.status == "completed":
+                    yield _sse("completed", {
+                        "job_id": job_id,
+                        "result_url": f"/api/v1/jobs/{job_id}/result",
+                        "report_url": f"/api/v1/jobs/{job_id}/report",
+                    })
+                    break
+
+                if job.status == "failed":
+                    yield _sse("failed", {
+                        "job_id": job_id,
+                        "error_code": job.error_code or "INTERNAL_ERROR",
+                        "message": job.error_message or "Error interno",
+                    })
+                    break
+        finally:
+            activity.unsubscribe(job_id, queue)
 
     return StreamingResponse(
         event_stream(),
@@ -133,6 +169,28 @@ async def get_job_progress(job_id: str):
             "Connection": "keep-alive",
         },
     )
+
+
+@router.get("/jobs/{job_id}/activity")
+async def get_job_activity(job_id: str, since: int = -1, limit: int = 500):
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(404, detail={
+            "error_code": "JOB_NOT_FOUND",
+            "message": f"Job {job_id} not found",
+            "timestamp": _now(),
+        })
+    events = activity.events_since(job_id, since)
+    truncated = len(events) > limit
+    clipped = events[:limit]
+    return {
+        "job_id": job_id,
+        "from_seq": since + 1,
+        "to_seq": clipped[-1].seq if clipped else since,
+        "count": len(clipped),
+        "events": [e.to_dict() for e in clipped],
+        "truncated": truncated,
+    }
 
 
 @router.get("/jobs/{job_id}/result")
@@ -155,8 +213,28 @@ async def get_job_result(job_id: str):
     return job.result
 
 
+@router.get("/jobs/{job_id}/report")
+async def get_job_report(job_id: str):
+    job = job_store.get(job_id)
+    if not job:
+        raise HTTPException(404, detail={
+            "error_code": "JOB_NOT_FOUND",
+            "message": "Job not found",
+            "timestamp": _now(),
+        })
+    return report_builder.build(job)
+
+
 def _sse(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _sse_activity(event) -> str:
+    return (
+        f"event: activity\n"
+        f"id: {event.seq}\n"
+        f"data: {json.dumps(event.to_dict(), ensure_ascii=False)}\n\n"
+    )
 
 
 def _estimate_seconds(file_bytes: int) -> int:
