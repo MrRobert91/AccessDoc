@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Reporte de accesibilidad — {{ filename or job_id }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --success: #047857;
+      --warn: #b45309;
+      --danger: #b91c1c;
+      --soft: #f1f5f9;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0f172a;
+        --card: #1e293b;
+        --border: #334155;
+        --text: #e2e8f0;
+        --muted: #94a3b8;
+        --soft: #1e293b;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      line-height: 1.55;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 2.5rem 1.5rem; }
+    h1 { font-size: 1.75rem; margin: 0 0 0.25rem; }
+    h2 { font-size: 1.25rem; margin: 2.25rem 0 0.75rem; }
+    h3 { font-size: 1rem; margin: 1.25rem 0 0.25rem; }
+    p.meta { color: var(--muted); margin: 0 0 1.5rem; }
+    .grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.25rem;
+    }
+    .score { font-size: 2rem; font-weight: 700; }
+    .score-delta.positive { color: var(--success); }
+    .score-delta.negative { color: var(--danger); }
+    .badge {
+      display: inline-block;
+      padding: 0 0.5rem;
+      border-radius: 999px;
+      background: var(--border);
+      color: var(--text);
+      font-size: 0.75rem;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
+    th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+    th { background: transparent; font-size: 0.75rem; text-transform: uppercase; color: var(--muted); }
+    tr.low-confidence td { background: rgba(180, 83, 9, 0.10); }
+    .empty { color: var(--muted); font-style: italic; }
+    .log { max-height: 480px; overflow-y: auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 0.5rem 1rem; }
+    .log .row { display: grid; grid-template-columns: 5.5rem 6rem 1fr; gap: 0.5rem; padding: 0.25rem 0; border-bottom: 1px solid var(--border); font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; font-size: 0.8rem; }
+    .log .row:last-child { border-bottom: 0; }
+    .log .level-warn { color: var(--warn); }
+    .log .level-error { color: var(--danger); }
+    .log .explain { grid-column: 1 / -1; color: var(--muted); font-family: system-ui; padding-left: 5.5rem; font-size: 0.78rem; margin-top: 0.15rem; }
+    .muted { color: var(--muted); }
+    .tag { font-size: 0.75rem; padding: 0 0.35rem; background: var(--border); border-radius: 4px; }
+    details { margin: 0.5rem 0; }
+    summary { cursor: pointer; font-weight: 600; padding: 0.25rem 0; }
+    a { color: var(--accent); }
+    .step {
+      border-left: 3px solid var(--accent);
+      padding: 0.4rem 0 0.4rem 0.9rem;
+      margin: 0.75rem 0;
+    }
+    .step-title { font-weight: 600; }
+    .step-kv { margin-top: 0.25rem; font-size: 0.9rem; }
+    .step-kv strong { color: var(--muted); font-weight: 600; }
+    .step ul { margin: 0.25rem 0 0; padding-left: 1.1rem; font-size: 0.9rem; }
+    .kv-row { margin: 0.2rem 0; font-size: 0.9rem; }
+    .kv-row strong { color: var(--muted); font-weight: 600; }
+    .issue-card {
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--warn);
+      border-radius: 10px;
+      padding: 0.75rem 1rem;
+      margin: 0.5rem 0;
+      background: var(--card);
+    }
+    .issue-title { font-weight: 600; }
+    .issue-hint { background: var(--soft); border-radius: 8px; padding: 0.5rem 0.75rem; margin-top: 0.5rem; font-size: 0.9rem; }
+    .change-row { margin: 0.4rem 0; padding: 0.5rem 0.75rem; border: 1px solid var(--border); border-radius: 8px; }
+    .change-row .why { color: var(--muted); font-size: 0.85rem; margin-top: 0.3rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Reporte de accesibilidad</h1>
+      <p class="meta">
+        {{ filename or job_id }} ·
+        {% if processing_time_seconds %}{{ "%.1f"|format(processing_time_seconds) }} s ·{% endif %}
+        {{ page_count }} página{{ "s" if page_count != 1 else "" }}
+        {% if model_used %}· Modelo: <span class="badge">{{ model_used }}</span>{% endif %}
+      </p>
+    </header>
+
+    <section>
+      <h2>Scores</h2>
+      <div class="grid">
+        <div class="card">
+          <div class="muted">Antes</div>
+          <div class="score">{{ before_score or 0 }}</div>
+        </div>
+        <div class="card">
+          <div class="muted">Después</div>
+          <div class="score">{{ after_score or 0 }}</div>
+        </div>
+        <div class="card">
+          <div class="muted">Mejora</div>
+          <div class="score score-delta {{ 'positive' if delta > 0 else 'negative' if delta < 0 else '' }}">
+            {{ ("+" if delta > 0 else "") ~ delta }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {% if narrative %}
+    <section>
+      <h2>Qué hicimos y por qué</h2>
+      {% for s in narrative %}
+        <h3>{{ s.heading }}</h3>
+        {% for p in s.paragraphs %}
+          <p>{{ p }}</p>
+        {% endfor %}
+
+        {% if "items" in s and s["items"] %}
+          <ul>
+            {% for item in s["items"] %}
+              {% if item is mapping %}
+                <li>
+                  {% if item.criterion_name %}<strong>{{ item.criterion }} · {{ item.criterion_name }}</strong>{% if item.criterion_level %} <span class="tag">WCAG {{ item.criterion_level }}</span>{% endif %} — {% endif %}
+                  {{ item.description }}
+                  {% if item.count %}<span class="muted">· {{ item.count }} ocurrencia(s)</span>{% endif %}
+                  {% if item.hint %}<div class="issue-hint">{{ item.hint }}</div>{% endif %}
+                </li>
+              {% else %}
+                <li>{{ item }}</li>
+              {% endif %}
+            {% endfor %}
+          </ul>
+        {% endif %}
+
+        {% if s.steps %}
+          {% for step in s.steps %}
+            <div class="step">
+              <div class="step-title">
+                {{ step.number }}. {{ step.title }}
+                {% if step.wcag %}<span class="tag">WCAG {{ step.wcag }}</span>{% endif %}
+                {% if step.pdfua %}<span class="tag">PDF/UA {{ step.pdfua }}</span>{% endif %}
+              </div>
+              {% if step.what %}<div class="step-kv"><strong>Qué hicimos:</strong> {{ step.what }}</div>{% endif %}
+              {% if step.why %}<div class="step-kv"><strong>Por qué:</strong> {{ step.why }}</div>{% endif %}
+              {% if step.impact %}<div class="step-kv"><strong>Impacto:</strong> {{ step.impact }}</div>{% endif %}
+              {% if step.examples %}
+                <ul>
+                  {% for ex in step.examples %}<li>{{ ex }}</li>{% endfor %}
+                </ul>
+              {% endif %}
+            </div>
+          {% endfor %}
+        {% endif %}
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    <section>
+      <h2>Resumen de cambios aplicados</h2>
+      {% if changes_summary_detailed %}
+      {% for row in changes_summary_detailed %}
+        <div class="change-row">
+          <div>
+            <strong>{{ row.title }}</strong>
+            <span class="badge">{{ row.count }}</span>
+            {% if row.wcag %}<span class="tag">WCAG {{ row.wcag }}</span>{% endif %}
+            {% if row.pdfua %}<span class="tag">PDF/UA {{ row.pdfua }}</span>{% endif %}
+          </div>
+          {% if row.what %}<div class="why"><strong>Qué:</strong> {{ row.what }}</div>{% endif %}
+          {% if row.why %}<div class="why"><strong>Por qué:</strong> {{ row.why }}</div>{% endif %}
+          {% if row.impact %}<div class="why"><strong>Impacto:</strong> {{ row.impact }}</div>{% endif %}
+          {% if row.examples %}
+            <div class="why"><strong>Ejemplos:</strong>
+              <ul>
+                {% for ex in row.examples %}
+                  <li>
+                    {% if ex.page %}pág. {{ ex.page }} — {% endif %}
+                    <span class="muted">{{ ex.before or "—" }}</span> → {{ ex.after or "—" }}
+                  </li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        </div>
+      {% endfor %}
+      {% else %}
+      <p class="empty">Sin cambios registrados.</p>
+      {% endif %}
+    </section>
+
+    <section>
+      <h2>Cambios por página</h2>
+      {% if changes_by_page %}
+        {% for page, changes in changes_by_page.items() %}
+        <details open>
+          <summary>Página {{ page }} ({{ changes|length }} cambio{{ "s" if changes|length != 1 else "" }})</summary>
+          {% for c in changes %}
+            <div class="change-row {{ 'low-confidence' if (c.confidence or 1) < 0.7 else '' }}" data-change-type="{{ c.change_type }}">
+              <div>
+                <strong>{{ (c.explanation or {}).title or c.change_type.replace("_", " ") }}</strong>
+                {% if c.criterion %}<span class="tag">WCAG {{ c.criterion }}</span>{% endif %}
+                {% if c.pdfua_rule %}<span class="tag">PDF/UA {{ c.pdfua_rule }}</span>{% endif %}
+                <span class="muted">· conf {{ "%.2f"|format(c.confidence or 0) }}</span>
+              </div>
+              <div class="kv-row">
+                <strong>Antes:</strong> <span class="muted">{{ c.before or "—" }}</span>
+                &nbsp;→&nbsp;
+                <strong>Después:</strong> {{ c.after or "—" }}
+              </div>
+              {% if c.explanation and c.explanation.why %}
+                <div class="why"><strong>Por qué:</strong> {{ c.explanation.why }}</div>
+              {% endif %}
+              {% if c.explanation and c.explanation.impact %}
+                <div class="why"><strong>Impacto:</strong> {{ c.explanation.impact }}</div>
+              {% endif %}
+            </div>
+          {% endfor %}
+        </details>
+        {% endfor %}
+      {% else %}
+      <p class="empty">Sin cambios por página.</p>
+      {% endif %}
+    </section>
+
+    {% if remaining_issues %}
+    <section>
+      <h2>Puntos a revisar manualmente</h2>
+      {% for issue in remaining_issues %}
+      <div class="issue-card">
+        <div class="issue-title">
+          {% if issue.criterion_name %}{{ issue.criterion }} · {{ issue.criterion_name }}{% else %}{{ issue.criterion or "—" }}{% endif %}
+          {% if issue.criterion_level %}<span class="tag">WCAG {{ issue.criterion_level }}</span>{% endif %}
+          {% if issue.severity %}<span class="badge">{{ issue.severity }}</span>{% endif %}
+        </div>
+        <div>{{ issue.description }}
+          {% if issue.count %}<span class="muted">· {{ issue.count }} ocurrencia(s)</span>{% endif %}
+        </div>
+        {% if issue.criterion_plain %}
+          <div class="why"><strong>Qué significa este criterio:</strong> {{ issue.criterion_plain }}</div>
+        {% endif %}
+        {% if issue.pdfua_plain %}
+          <div class="why"><strong>Regla PDF/UA:</strong> {{ issue.pdfua_plain }}</div>
+        {% endif %}
+        {% if issue.hint %}
+          <div class="issue-hint"><strong>Cómo revisarlo manualmente:</strong> {{ issue.hint }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </section>
+    {% endif %}
+
+    {% if glossary and (glossary.wcag or glossary.pdfua) %}
+    <section>
+      <h2>Glosario aplicable a este documento</h2>
+      {% if glossary.wcag %}
+        <h3>Criterios WCAG mencionados</h3>
+        <table>
+          <thead><tr><th>Criterio</th><th>Nivel</th><th>Significado</th></tr></thead>
+          <tbody>
+            {% for c in glossary.wcag %}
+            <tr>
+              <td><strong>{{ c.code }}</strong> {{ c.name }}</td>
+              <td><span class="tag">{{ c.level }}</span></td>
+              <td>{{ c.plain }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+      {% if glossary.pdfua %}
+        <h3>Reglas PDF/UA-1 mencionadas</h3>
+        <table>
+          <thead><tr><th>Regla</th><th>Significado</th></tr></thead>
+          <tbody>
+            {% for r in glossary.pdfua %}
+            <tr><td><strong>§{{ r.rule }}</strong></td><td>{{ r.plain }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% endif %}
+    </section>
+    {% endif %}
+
+    <section>
+      <h2>Log de actividad ({{ activity_log|length }} eventos)</h2>
+      {% if activity_log %}
+      <div class="log" role="log">
+        {% for e in activity_log %}
+        <div class="row level-{{ e.level }}">
+          <span class="muted">{{ e.ts[11:19] if e.ts else "" }}</span>
+          <span class="tag">{{ e.phase }}</span>
+          <span>
+            {% if e.page %}<span class="tag">p{{ e.page }}</span>{% endif %}
+            {{ e.message }}
+            {% if e.duration_ms %}<span class="muted">· {{ e.duration_ms }} ms</span>{% endif %}
+          </span>
+          {% if e.details and e.details.explanation and e.details.explanation.why %}
+            <div class="explain">{{ e.details.explanation.why }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="empty">Sin eventos registrados.</p>
+      {% endif %}
+    </section>
+
+    <footer>
+      <p class="meta">
+        Generado por AccessDoc · job <code>{{ job_id }}</code>
+        {% if processed_at %}· {{ processed_at }}{% endif %}
+      </p>
+    </footer>
+  </main>
+</body>
+</html>

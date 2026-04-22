@@ -17,8 +17,9 @@ class Settings(BaseSettings):
 
     enable_mcid_tagging: bool = True
     enable_ocr: bool = True
-    enable_annotations_tagging: bool = False
-    enable_form_tagging: bool = False
+    enable_annotations_tagging: bool = True
+    enable_form_tagging: bool = True
+    enable_abbreviation_expansion: bool = False
     activity_buffer_max: int = 2000
     activity_rate_limit_per_sec: int = 50
 

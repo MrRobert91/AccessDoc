@@ -1,5 +1,7 @@
 import asyncio
 import threading
+import time
+from collections import deque
 from typing import Optional
 
 import structlog
@@ -7,6 +9,7 @@ import structlog
 from app.config import settings
 from app.models.activity import ActivityEvent, VALID_LEVELS, VALID_PHASES
 from app.services.job_store import job_store
+from app.services.observability.explanations import for_code
 
 log = structlog.get_logger()
 
@@ -18,12 +21,20 @@ class ActivityLogger:
     emit() is callable from sync or async context. Each event is:
       1. appended to the Job's activity buffer (capped)
       2. pushed to every live SSE subscriber queue for that job
+
+    A per-job token-bucket rate limiter drops *info*-level events above
+    settings.activity_rate_limit_per_sec. warn/error always pass through
+    (they're load-bearing for observability). When a burst is dropped the
+    logger emits a single coalesced `activity_rate_limited` event at the
+    end of each overflowing second so the UI can signal it.
     """
 
     def __init__(self):
         self._subs: dict[str, list[asyncio.Queue]] = {}
         self._lock = threading.Lock()
         self._loops: dict[str, asyncio.AbstractEventLoop] = {}
+        self._recent_ts: dict[str, deque[float]] = {}
+        self._dropped: dict[str, int] = {}
 
     def subscribe(self, job_id: str) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=500)
@@ -63,9 +74,20 @@ class ActivityLogger:
         if not job:
             return None
 
+        if level == "info" and self._is_rate_limited(job_id):
+            self._dropped[job_id] = self._dropped.get(job_id, 0) + 1
+            return None
+
         with self._lock:
+            rate_dropped = self._dropped.pop(job_id, 0)
             seq = job.activity_cursor
             job.activity_cursor = seq + 1
+
+            enriched = dict(details) if isinstance(details, dict) else {}
+            explanation = for_code(code)
+            if explanation and "explanation" not in enriched:
+                enriched["explanation"] = explanation
+
             event = ActivityEvent(
                 seq=seq,
                 job_id=job_id,
@@ -75,13 +97,13 @@ class ActivityLogger:
                 level=level,
                 page=page,
                 duration_ms=duration_ms,
-                details=details,
+                details=enriched or None,
             )
             job.activity.append(event)
             cap = settings.activity_buffer_max
             if len(job.activity) > cap:
-                dropped = len(job.activity) - cap
-                job.activity = job.activity[dropped:]
+                trim = len(job.activity) - cap
+                job.activity = job.activity[trim:]
 
             subs = list(self._subs.get(job_id, []))
             loop = self._loops.get(job_id)
@@ -95,7 +117,28 @@ class ActivityLogger:
         for q in subs:
             self._push(q, event, level, loop)
 
+        if rate_dropped > 0 and code != "activity_rate_limited":
+            self.emit(
+                job_id, "report", "activity_rate_limited",
+                f"{rate_dropped} evento(s) info coalescidos por rate-limit",
+                level="warn",
+                details={"dropped": rate_dropped},
+            )
+
         return event
+
+    def _is_rate_limited(self, job_id: str) -> bool:
+        limit = max(int(settings.activity_rate_limit_per_sec or 0), 0)
+        if limit == 0:
+            return False
+        window = self._recent_ts.setdefault(job_id, deque())
+        now = time.monotonic()
+        while window and now - window[0] > 1.0:
+            window.popleft()
+        if len(window) >= limit:
+            return True
+        window.append(now)
+        return False
 
     def events_since(self, job_id: str, since_seq: int) -> list[ActivityEvent]:
         job = job_store.get(job_id)

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import type { ActivityEvent } from "@/lib/api"
+import type { ActivityEvent, Explanation } from "@/lib/api"
 
 type Props = {
   events: ActivityEvent[]
@@ -27,12 +27,15 @@ const PHASE_LABELS: Record<string, string> = {
   validate: "Validación",
   retry: "Reintento",
   report: "Reporte",
+  annotations: "Anotaciones",
 }
 
 export function LiveActivityPanel({ events, maxVisible = 400, className = "" }: Props) {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>("all")
   const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("all")
   const [autoscroll, setAutoscroll] = useState(true)
+  const [verbose, setVerbose] = useState(true)
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({})
   const listRef = useRef<HTMLUListElement>(null)
 
   const phases = useMemo(() => {
@@ -69,10 +72,19 @@ export function LiveActivityPanel({ events, maxVisible = 400, className = "" }: 
             Actividad en vivo
           </h2>
           <p className="text-xs text-slate-500">
-            {events.length} eventos · mostrando {filtered.length}
+            {events.length} eventos · mostrando {filtered.length} · haz clic en una línea para ver la explicación
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs">
+          <label className="flex items-center gap-1">
+            <input
+              type="checkbox"
+              checked={verbose}
+              onChange={(e) => setVerbose(e.target.checked)}
+              className="h-3 w-3"
+            />
+            <span className="text-slate-600">Verbose</span>
+          </label>
           <label className="flex items-center gap-1">
             <span className="text-slate-600">Nivel:</span>
             <select
@@ -117,39 +129,81 @@ export function LiveActivityPanel({ events, maxVisible = 400, className = "" }: 
         role="log"
         aria-live="polite"
         aria-relevant="additions"
-        className="h-72 overflow-y-auto px-4 py-2 font-mono text-xs"
+        className="max-h-[36rem] min-h-72 overflow-y-auto px-4 py-2 font-mono text-xs"
       >
         {filtered.length === 0 ? (
           <li className="py-2 text-center text-slate-400">
             Esperando eventos...
           </li>
         ) : (
-          filtered.map((e) => (
-            <li
-              key={e.seq}
-              className={`grid grid-cols-[3.5rem_4.5rem_1fr] gap-2 border-b border-slate-50 py-1 ${LEVEL_STYLES[e.level] ?? ""}`}
-            >
-              <time className="text-slate-400" dateTime={e.ts}>
-                {formatTime(e.ts)}
-              </time>
-              <span className="font-semibold uppercase">
-                {PHASE_LABELS[e.phase] ?? e.phase}
-              </span>
-              <span>
-                {e.page != null && (
-                  <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">
-                    p{e.page}
+          filtered.map((e) => {
+            const exp = e.details?.explanation as Explanation | undefined
+            const isOpen = expanded[e.seq] ?? verbose
+            return (
+              <li
+                key={e.seq}
+                className={`border-b border-slate-50 py-1 ${LEVEL_STYLES[e.level] ?? ""}`}
+              >
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpanded((prev) => ({ ...prev, [e.seq]: !isOpen }))
+                  }
+                  className="grid w-full grid-cols-[3.5rem_4.5rem_1fr] gap-2 text-left hover:bg-slate-50"
+                >
+                  <time className="text-slate-400" dateTime={e.ts}>
+                    {formatTime(e.ts)}
+                  </time>
+                  <span className="font-semibold uppercase">
+                    {PHASE_LABELS[e.phase] ?? e.phase}
                   </span>
-                )}
-                {e.message}
-                {e.duration_ms != null && (
-                  <span className="ml-1 text-slate-400">
-                    · {e.duration_ms}ms
+                  <span>
+                    {e.page != null && (
+                      <span className="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">
+                        p{e.page}
+                      </span>
+                    )}
+                    {e.message}
+                    {e.duration_ms != null && (
+                      <span className="ml-1 text-slate-400">
+                        · {e.duration_ms}ms
+                      </span>
+                    )}
                   </span>
+                </button>
+                {isOpen && exp && (
+                  <div className="ml-[8rem] mt-1 space-y-0.5 rounded bg-slate-50 px-2 py-1.5 font-sans text-[11px] leading-snug text-slate-700">
+                    {exp.title && (
+                      <div className="font-semibold text-slate-900">{exp.title}</div>
+                    )}
+                    {exp.what && (
+                      <div><strong className="text-slate-500">Qué: </strong>{exp.what}</div>
+                    )}
+                    {exp.why && (
+                      <div><strong className="text-slate-500">Por qué: </strong>{exp.why}</div>
+                    )}
+                    {exp.impact && (
+                      <div><strong className="text-slate-500">Impacto: </strong>{exp.impact}</div>
+                    )}
+                    {(exp.wcag || exp.pdfua) && (
+                      <div className="mt-0.5 flex flex-wrap gap-1">
+                        {exp.wcag && (
+                          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                            WCAG {exp.wcag}
+                          </span>
+                        )}
+                        {exp.pdfua && (
+                          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800">
+                            PDF/UA §{exp.pdfua}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 )}
-              </span>
-            </li>
-          ))
+              </li>
+            )
+          })
         )}
       </ul>
     </section>

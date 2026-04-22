@@ -102,6 +102,9 @@ class PDFExtractor:
         avg_chars = total_text_chars / max(len(pages), 1)
         needs_ocr = avg_chars < 50
 
+        if needs_ocr and self._has_form_widgets():
+            needs_ocr = False
+
         try:
             catalog = self._mupdf.pdf_catalog()
             has_tags = catalog is not None and "MarkInfo" in str(catalog)
@@ -114,6 +117,18 @@ class PDFExtractor:
             needs_ocr=needs_ocr,
             has_existing_tags=has_tags,
         )
+
+    def _has_form_widgets(self) -> bool:
+        try:
+            if getattr(self._mupdf, "is_form_pdf", False):
+                return True
+            for page in self._mupdf:
+                widgets = list(page.widgets() or [])
+                if widgets:
+                    return True
+        except Exception:
+            return False
+        return False
 
     def _extract_page(self, mupdf_page, plumber_page, page_num: int) -> PageData:
         words = plumber_page.extract_words(

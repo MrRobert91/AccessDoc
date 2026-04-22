@@ -146,12 +146,69 @@ def make_scanned_pdf() -> Path:
     return path
 
 
+def make_links_pdf() -> Path:
+    """PDF with two hyperlink annotations (external URI and bookmark)."""
+    path = FIXTURES_DIR / "links.pdf"
+    c = canvas.Canvas(str(path), pagesize=A4)
+    page_w, page_h = A4
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawString(72, page_h - 72, "Referencias")
+
+    c.setFont("Helvetica", 12)
+    anchor_y = page_h - 140
+    c.drawString(72, anchor_y, "Sitio oficial: https://www.example.com/accessibility")
+    c.linkURL(
+        "https://www.example.com/accessibility",
+        (72, anchor_y - 4, 72 + 360, anchor_y + 14),
+        relative=0,
+    )
+
+    intra_y = anchor_y - 40
+    c.drawString(72, intra_y, "Ver sección Apéndice (ancla interna)")
+    c.bookmarkPage("apendice")
+    c.linkAbsolute("apendice", "apendice", (72, intra_y - 4, 72 + 300, intra_y + 14))
+
+    c.save()
+    return path
+
+
+def make_form_pdf() -> Path:
+    """PDF with two AcroForm text widgets (FR-A12 fixture)."""
+    path = FIXTURES_DIR / "form.pdf"
+    c = canvas.Canvas(str(path), pagesize=A4)
+    page_w, page_h = A4
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(72, page_h - 72, "Formulario de inscripción")
+
+    c.setFont("Helvetica", 11)
+    c.drawString(72, page_h - 120, "Nombre:")
+    c.acroForm.textfield(
+        name="nombre",
+        tooltip="Nombre completo del solicitante",
+        x=140, y=page_h - 128, width=300, height=20,
+        borderStyle="inset",
+    )
+
+    c.drawString(72, page_h - 170, "Email:")
+    c.acroForm.textfield(
+        name="email",
+        tooltip="Correo electrónico de contacto",
+        x=140, y=page_h - 178, width=300, height=20,
+        borderStyle="inset",
+    )
+    c.save()
+    return path
+
+
 def make_all() -> dict:
     return {
         "simple.pdf": make_simple_pdf(),
         "multicolumn.pdf": make_multicolumn_pdf(),
         "complex_tables.pdf": make_complex_tables_pdf(),
         "scanned.pdf": make_scanned_pdf(),
+        "links.pdf": make_links_pdf(),
+        "form.pdf": make_form_pdf(),
     }
 
 

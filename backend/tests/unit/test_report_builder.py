@@ -87,3 +87,88 @@ def test_report_summary_counts_change_types():
     assert report["changes_summary"]["heading_tagged"] == 2
     assert report["changes_summary"]["alt_text_added"] == 1
     job_store._jobs.pop("report-test-3", None)
+
+
+def test_report_has_verbose_summary_with_explanations():
+    _setup_completed_job("report-test-4")
+    job = job_store.get("report-test-4")
+    report = ReportBuilder().build(job)
+
+    detailed = report["changes_summary_detailed"]
+    assert isinstance(detailed, list)
+    by_type = {row["change_type"]: row for row in detailed}
+
+    heading_row = by_type["heading_tagged"]
+    assert heading_row["count"] == 2
+    assert heading_row["title"]
+    assert heading_row["why"]
+    assert heading_row["wcag"] == "1.3.1"
+
+    alt_row = by_type["alt_text_added"]
+    assert alt_row["wcag"] == "1.1.1"
+    assert alt_row["pdfua"] == "7.18.1"
+
+    job_store._jobs.pop("report-test-4", None)
+
+
+def test_report_has_narrative_sections():
+    _setup_completed_job("report-test-5")
+    job = job_store.get("report-test-5")
+    report = ReportBuilder().build(job)
+
+    narrative = report["narrative"]
+    headings = [s["heading"] for s in narrative]
+    assert "El documento original" in headings
+    assert "Qué detectamos" in headings
+    assert "Qué hicimos, paso a paso" in headings
+    assert "Qué queda pendiente" in headings
+    assert "Resultado" in headings
+
+    steps_section = next(s for s in narrative if s["heading"] == "Qué hicimos, paso a paso")
+    assert len(steps_section["steps"]) >= 2
+    first = steps_section["steps"][0]
+    assert first["number"] == 1
+    assert first["title"]
+
+    result_section = next(s for s in narrative if s["heading"] == "Resultado")
+    joined = " ".join(result_section["paragraphs"])
+    assert "15" in joined and "92" in joined
+
+    job_store._jobs.pop("report-test-5", None)
+
+
+def test_report_builds_glossary_from_used_criteria():
+    _setup_completed_job("report-test-6")
+    job = job_store.get("report-test-6")
+    report = ReportBuilder().build(job)
+
+    glossary = report["glossary"]
+    wcag_codes = [c["code"] for c in glossary["wcag"]]
+    assert "1.1.1" in wcag_codes
+    assert "1.3.1" in wcag_codes
+    pdfua_rules = [r["rule"] for r in glossary["pdfua"]]
+    assert "7.18.1" in pdfua_rules
+
+    job_store._jobs.pop("report-test-6", None)
+
+
+def test_activity_event_carries_explanation():
+    job_store._jobs.pop("explain-test-1", None)
+    job_store.create(
+        job_id="explain-test-1",
+        original_filename="x.pdf",
+        original_path="/tmp/x.pdf",
+        options={},
+    )
+    logger = ActivityLogger()
+    event = logger.emit(
+        "explain-test-1", "write", "form_fields_tagged",
+        "2 campo(s) etiquetados", details={"fields": 2},
+    )
+    assert event is not None
+    assert event.details and "explanation" in event.details
+    exp = event.details["explanation"]
+    assert exp["title"]
+    assert exp["wcag"] == "4.1.2"
+    assert exp["pdfua"] == "7.18.4"
+    job_store._jobs.pop("explain-test-1", None)

@@ -94,6 +94,8 @@ class JobStore:
                 "remaining_issues": [r.__dict__ for r in remaining_issues],
                 "download_url": f"/api/v1/jobs/{job_id}/download",
                 "report_url": f"/api/v1/jobs/{job_id}/report",
+                "report_json_url": f"/api/v1/jobs/{job_id}/report.json",
+                "report_html_url": f"/api/v1/jobs/{job_id}/report.html",
                 "processed_at": datetime.utcnow().isoformat(),
                 "processing_time_seconds": (
                     datetime.utcnow() - job.created_at

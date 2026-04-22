@@ -1,10 +1,12 @@
+import json
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 
 from app.services.job_store import job_store
+from app.services.reporting.report_builder import report_builder
 
 router = APIRouter(tags=["Downloads"])
 
@@ -51,8 +53,37 @@ async def download_accessible_pdf(job_id: str):
     )
 
 
-@router.get("/jobs/{job_id}/report")
-async def get_job_report(job_id: str):
+@router.get("/jobs/{job_id}/report.json")
+async def download_report_json(job_id: str):
+    job = _require_completed_job(job_id)
+    report = report_builder.build(job)
+    stem = Path(job.original_filename).stem or "report"
+    payload = json.dumps(report, ensure_ascii=False, indent=2)
+    return Response(
+        content=payload,
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="{stem}_accessibility.json"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@router.get("/jobs/{job_id}/report.html")
+async def download_report_html(job_id: str):
+    job = _require_completed_job(job_id)
+    html = report_builder.render_html(job)
+    stem = Path(job.original_filename).stem or "report"
+    return HTMLResponse(
+        content=html,
+        headers={
+            "Content-Disposition": f'inline; filename="{stem}_accessibility.html"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+def _require_completed_job(job_id: str):
     job = job_store.get(job_id)
     if not job:
         raise HTTPException(404, detail={
@@ -66,7 +97,7 @@ async def get_job_report(job_id: str):
             "message": "El reporte aún no está disponible",
             "timestamp": _now(),
         })
-    return job.result
+    return job
 
 
 def _now() -> str:

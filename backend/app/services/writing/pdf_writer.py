@@ -5,10 +5,13 @@ from pikepdf import Array, Dictionary, Name, String
 from app.config import settings
 from app.models.accessibility import BlockChange
 from app.services.analysis.hierarchy_fixer import DocumentStructure
+from app.services.writing.abbreviation_expander import AbbreviationExpander
+from app.services.writing.annotations_tagger import LinkAnnotationsTagger
 from app.services.writing.content_stream_tagger import (
     ContentStreamTagger,
     TagResult,
 )
+from app.services.writing.form_tagger import FormFieldsTagger
 
 log = structlog.get_logger()
 
@@ -32,6 +35,10 @@ class AccessiblePDFWriter:
             "mcid_linked": 0,
             "struct_elems": 0,
             "per_page": {},
+            "links_tagged": 0,
+            "page_labels": False,
+            "fields_tagged": 0,
+            "abbreviations_expanded": 0,
         }
 
     def write(self, output_path: str) -> None:
@@ -39,6 +46,7 @@ class AccessiblePDFWriter:
             self._set_document_metadata(pdf)
             self._mark_tagged(pdf)
             self._set_viewer_preferences(pdf)
+            self._set_page_labels(pdf)
 
             if settings.enable_mcid_tagging:
                 try:
@@ -53,6 +61,35 @@ class AccessiblePDFWriter:
                     self._tag_result = None
 
             self._build_tag_tree(pdf)
+            if settings.enable_annotations_tagging:
+                try:
+                    link_tagger = LinkAnnotationsTagger(self.structure.language)
+                    link_result = link_tagger.tag(pdf)
+                    self._stats["links_tagged"] = link_result.links_tagged
+                    for change in link_result.changes:
+                        self._applied_changes.append(change)
+                except Exception as e:
+                    log.warning("link_tagging_failed", error=str(e))
+            if settings.enable_form_tagging:
+                try:
+                    form_tagger = FormFieldsTagger(self.structure.language)
+                    form_result = form_tagger.tag(pdf)
+                    self._stats["fields_tagged"] = form_result.fields_tagged
+                    for change in form_result.changes:
+                        self._applied_changes.append(change)
+                except Exception as e:
+                    log.warning("form_tagging_failed", error=str(e))
+            if settings.enable_abbreviation_expansion:
+                try:
+                    expander = AbbreviationExpander()
+                    expansion_result = expander.expand(pdf)
+                    self._stats["abbreviations_expanded"] = (
+                        expansion_result.expansions_applied
+                    )
+                    for change in expansion_result.changes:
+                        self._applied_changes.append(change)
+                except Exception as e:
+                    log.warning("abbreviation_expansion_failed", error=str(e))
             self._add_bookmarks(pdf)
             pdf.save(
                 output_path,
@@ -87,6 +124,53 @@ class AccessiblePDFWriter:
                 "(no language)", self.structure.language, 0
             )
             meta["pdfuaid:part"] = "1"
+
+            description = (
+                self.structure.document_title or "Documento remediado por AccessDoc"
+            )
+            meta["dc:description"] = description
+            if "dc:creator" not in meta:
+                meta["dc:creator"] = ["AccessDoc"]
+            meta["xmp:CreatorTool"] = "AccessDoc 1.0 (PDF/UA-1 remediation)"
+            meta["pdf:Producer"] = "AccessDoc via pikepdf"
+            self._record(
+                "xmp_extended", "2.4.2",
+                "(basic metadata)",
+                "dc:description + dc:creator + xmp:CreatorTool + pdf:Producer",
+                0,
+            )
+
+    def _set_page_labels(self, pdf: pikepdf.Pdf) -> None:
+        """
+        Emit a basic /PageLabels tree (FR-A10).
+
+        v1: decimal numbering starting at 1 for the whole document. This is
+        a sane default that satisfies assistive-tech expectations and aligns
+        the visible page number with the logical one. A future refinement
+        could partition front-matter (roman) vs body (decimal) using a
+        detector fed from the extraction artifacts.
+        """
+        try:
+            page_count = len(pdf.pages)
+        except Exception:
+            page_count = 0
+        if page_count <= 0:
+            return
+
+        labels = pdf.make_indirect(Dictionary(
+            Nums=Array([
+                0,
+                Dictionary(S=Name("/D"), St=1),
+            ]),
+        ))
+        pdf.Root.PageLabels = labels
+        self._stats["page_labels"] = True
+        self._record(
+            "page_labels_set", "1.3.1",
+            "(no page labels)",
+            f"decimal 1..{page_count}",
+            0,
+        )
 
     def _mark_tagged(self, pdf: pikepdf.Pdf) -> None:
         pdf.Root.MarkInfo = Dictionary(Marked=True, Suspects=False)
@@ -324,13 +408,15 @@ class AccessiblePDFWriter:
         has_row_header = num_cols >= 2 and num_rows >= 2
         dual_header = has_header_row and has_row_header
 
-        table_elem = pdf.make_indirect(Dictionary(
+        table_dict = Dictionary(
             Type=Name("/StructElem"),
             S=Name("/Table"),
             P=parent,
             K=Array(),
             A=Dictionary(O=Name("/Table"), Summary=String("")),
-        ))
+        )
+        self._apply_lang(table_dict, block)
+        table_elem = pdf.make_indirect(table_dict)
 
         leaves: list[tuple[dict, object]] = []
         col_header_ids: list[str | None] = [None] * num_cols
@@ -423,7 +509,7 @@ class AccessiblePDFWriter:
             ))
             return list_elem, []
 
-        list_elem = pdf.make_indirect(Dictionary(
+        list_dict = Dictionary(
             Type=Name("/StructElem"),
             S=Name("/L"),
             P=parent,
@@ -432,7 +518,9 @@ class AccessiblePDFWriter:
                 O=Name("/List"),
                 ListNumbering=_list_numbering(items),
             ),
-        ))
+        )
+        self._apply_lang(list_dict, block)
+        list_elem = pdf.make_indirect(list_dict)
 
         leaves: list[tuple[dict, object]] = []
         for idx, item in enumerate(items):
@@ -491,13 +579,30 @@ class AccessiblePDFWriter:
             alt = block.get("alt_text", "")
             if not alt or alt.lower() == "decorative":
                 return None
-            return pdf.make_indirect(Dictionary(
+            figure_dict = Dictionary(
                 Type=Name("/StructElem"),
                 S=Name("/Figure"),
                 Alt=String(alt),
                 P=parent,
                 K=Array(),
-            ))
+            )
+            bbox = block.get("bbox")
+            attrs_items: list[Dictionary] = [Dictionary(
+                O=Name("/Layout"),
+                Placement=Name("/Block"),
+            )]
+            if bbox and len(bbox) == 4:
+                try:
+                    bbox_arr = Array([float(x) for x in bbox])
+                    attrs_items[0].BBox = bbox_arr
+                except Exception:
+                    pass
+            actual = block.get("actual_text")
+            if actual and isinstance(actual, str) and actual.strip():
+                figure_dict.ActualText = String(actual.strip())
+            figure_dict.A = Array(attrs_items) if len(attrs_items) > 1 else attrs_items[0]
+            self._apply_lang(figure_dict, block)
+            return pdf.make_indirect(figure_dict)
 
         attrs = Dictionary(
             Type=Name("/StructElem"),
@@ -507,7 +612,21 @@ class AccessiblePDFWriter:
         )
         if role.startswith("H") and text:
             attrs.T = String(text[:80])
+        self._apply_lang(attrs, block)
         return pdf.make_indirect(attrs)
+
+    def _apply_lang(self, elem_dict: Dictionary, block: dict) -> None:
+        """FR-A9: set /Lang on the StructElem when it differs from doc lang."""
+        lang = block.get("language") or block.get("lang")
+        if not lang or not isinstance(lang, str):
+            return
+        lang = lang.strip()
+        if not lang or lang == self.structure.language:
+            return
+        try:
+            elem_dict.Lang = String(lang)
+        except Exception:
+            pass
 
     def _add_bookmarks(self, pdf: pikepdf.Pdf) -> None:
         headings = self.structure.headings_hierarchy
@@ -562,7 +681,7 @@ class AccessiblePDFWriter:
             TOC=Name("/TOC"), TOCI=Name("/TOCI"),
             Footnote=Name("/Note"), Code=Name("/Code"),
             Formula=Name("/Formula"), Artifact=Name("/Artifact"),
-            Span=Name("/Span"),
+            Span=Name("/Span"), Form=Name("/Form"), Link=Name("/Link"),
         )
 
     def _record(
@@ -619,6 +738,11 @@ def _pdfua_rule_for(change_type: str) -> str | None:
         "alt_text_added": "7.18.1",
         "list_structured": "7.6",
         "table_header_tagged": "7.5",
+        "link_tagged": "7.18.5",
+        "page_labels_set": "7.1-1",
+        "xmp_extended": "7.1-1",
+        "form_field_tagged": "7.18.4",
+        "abbreviation_expanded": "7.9",
     }.get(change_type)
 
 

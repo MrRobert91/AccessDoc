@@ -1,7 +1,17 @@
 {
   "permissions": {
     "allow": [
-      "Bash(docker info *)"
+      "Bash(docker info *)",
+      "PowerShell(curl.exe -s http://localhost:8001/health)",
+      "PowerShell(curl.exe -s http://localhost:8001/)",
+      "PowerShell(curl.exe -s http://localhost:8001/docs)",
+      "PowerShell(curl.exe -s -F 'file=@c:\\\\Users\\\\david\\\\Desktop\\\\AccessDoc\\\\backend\\\\tests\\\\fixtures\\\\form.pdf' http://localhost:8001/api/v1/process)",
+      "PowerShell(curl.exe -s http://localhost:8001/api/v1/jobs/b2d7c0e2-8224-450c-94ab-634c3091b027/result)",
+      "PowerShell(docker exec accessdoc-backend-1 bash -lc \"ls /tmp/accessdoc/b2d7c0e2-8224-450c-94ab-634c3091b027/ && echo --- && python /tmp/pdfprobe.py /tmp/accessdoc/b2d7c0e2-8224-450c-94ab-634c3091b027/accessible.pdf\")",
+      "PowerShell(docker exec accessdoc-backend-1 grep -n \"_has_form_widgets\\\\|is_form_pdf\" /app/app/services/extraction/pdf_extractor.py)",
+      "PowerShell(docker compose -f c:\\\\Users\\\\david\\\\Desktop\\\\AccessDoc\\\\docker-compose.yml build backend 2>&1)",
+      "PowerShell(docker compose -f c:\\\\Users\\\\david\\\\Desktop\\\\AccessDoc\\\\docker-compose.yml up -d backend 2>&1)",
+      "PowerShell($out = curl.exe -s -X POST -F \"file=@C:\\\\Users\\\\david\\\\AppData\\\\Local\\\\Temp\\\\form.pdf;type=application/pdf\" http://localhost:8001/api/v1/jobs; Write-Host $out; $m = [regex]::Match\\($out, '\"job_id\":\"\\([^\"]+\\)\"'\\); $jobId = $m.Groups[1].Value; Write-Host \"JOB=$jobId\")"
     ]
   }
 }

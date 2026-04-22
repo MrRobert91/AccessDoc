@@ -83,6 +83,7 @@ Respond with this exact JSON structure:
       "id": "p{page_num}_b0",
       "role": "H1|H2|H3|P|Figure|Table|L|Caption|Artifact|...",
       "text": "block text content",
+      "language": "en",
       "level": 1,
       "is_decorative": false,
       "alt_text_needed": false,
@@ -102,6 +103,10 @@ IMPORTANT on lists (role="L"):
 - Always return an "items" array. Each item MUST have "label" (bullet or number marker, e.g. "•", "-", "1.", "a)") and "body" (the item text without the marker).
 - If the list is unnumbered, use "•" for every label.
 - Do NOT emit children blocks with role="LI"/"LBody" — the items array is the single source of truth for list content.
+
+IMPORTANT on per-block language:
+- Only set the optional "language" field on a block when its natural language is CLEARLY different from the page-level language (e.g. an English quote in a Spanish document). Omit the field otherwise.
+- Use ISO-639-1 codes (en, es, fr, de, pt).
 """.strip()
 
         try:

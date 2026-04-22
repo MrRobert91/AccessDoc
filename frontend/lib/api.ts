@@ -11,6 +11,17 @@ export type UploadResponse = {
   expires_at: string
 }
 
+export type Explanation = {
+  title?: string
+  what?: string
+  why?: string
+  impact?: string
+  wcag?: string
+  pdfua?: string
+  user_level?: string
+  tags?: string[]
+}
+
 export type ActivityEvent = {
   seq: number
   job_id: string
@@ -20,7 +31,7 @@ export type ActivityEvent = {
   level: "info" | "warn" | "error"
   page: number | null
   duration_ms: number | null
-  details: Record<string, unknown> | null
+  details: (Record<string, unknown> & { explanation?: Explanation }) | null
   ts: string
 }
 
@@ -53,6 +64,63 @@ export type BlockChangeEntry = {
   mcid?: number
   pdfua_rule?: string
   wcag_level?: string
+  explanation?: Explanation
+}
+
+export type ChangeSummaryRow = {
+  change_type: string
+  count: number
+  title: string
+  what?: string
+  why?: string
+  impact?: string
+  wcag?: string
+  pdfua?: string
+  examples?: Array<{ page?: number | null; before?: string; after?: string }>
+}
+
+export type EnrichedIssue = {
+  criterion?: string
+  criterion_name?: string
+  criterion_level?: string
+  criterion_plain?: string
+  pdfua_plain?: string
+  severity: string
+  description: string
+  count?: number
+  hint?: string
+}
+
+export type NarrativeStep = {
+  number: number
+  title: string
+  what?: string
+  why?: string
+  impact?: string
+  wcag?: string
+  pdfua?: string
+  count?: number
+  examples?: string[]
+}
+
+export type NarrativeSection = {
+  heading: string
+  paragraphs?: string[]
+  items?: Array<string | Record<string, unknown>>
+  steps?: NarrativeStep[]
+}
+
+export type GlossaryEntry = {
+  code?: string
+  rule?: string
+  name?: string
+  level?: string
+  plain: string
+}
+
+export type Glossary = {
+  wcag: GlossaryEntry[]
+  pdfua: GlossaryEntry[]
 }
 
 export type RemediationReport = {
@@ -69,9 +137,13 @@ export type RemediationReport = {
   }
   changes_by_page: Record<string, BlockChangeEntry[]>
   changes_by_criterion: Record<string, BlockChangeEntry[]>
+  changes_applied?: BlockChangeEntry[]
   changes_summary: Record<string, number>
-  remaining_issues: Array<{ criterion?: string; severity: string; description: string; count?: number }>
+  changes_summary_detailed: ChangeSummaryRow[]
+  remaining_issues: EnrichedIssue[]
   activity_log: ActivityEvent[]
+  narrative?: NarrativeSection[]
+  glossary?: Glossary
   download_url: string
 }
 
@@ -135,6 +207,14 @@ export async function fetchReport(jobId: string): Promise<RemediationReport> {
 
 export function downloadUrl(jobId: string): string {
   return `${API_BASE}/jobs/${jobId}/download`
+}
+
+export function reportJsonUrl(jobId: string): string {
+  return `${API_BASE}/jobs/${jobId}/report.json`
+}
+
+export function reportHtmlUrl(jobId: string): string {
+  return `${API_BASE}/jobs/${jobId}/report.html`
 }
 
 export function sseUrl(jobId: string): string {

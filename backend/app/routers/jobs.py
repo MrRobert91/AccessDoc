@@ -167,6 +167,7 @@ async def get_job_progress(job_id: str, request: Request):
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",
             "Connection": "keep-alive",
+            "Content-Encoding": "identity",
         },
     )
 

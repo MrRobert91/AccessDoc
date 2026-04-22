@@ -10,6 +10,7 @@ from app.services.extraction.ocr_runner import OCRRunner
 from app.services.extraction.pdf_extractor import PDFExtractor
 from app.services.job_store import job_store
 from app.services.observability.activity_logger import activity
+from app.services.validation.issue_scanner import scan_pdf
 from app.services.validation.score_calculator import ScoreCalculator
 from app.services.validation.verapdf_runner import VeraPDFRunner
 from app.services.writing.pdf_writer import AccessiblePDFWriter
@@ -330,6 +331,34 @@ class AccessibilityPipeline:
                     details={"mcid_count": mcid_count},
                 )
 
+        if stats.get("page_labels"):
+            activity.emit(
+                job_id, "write", "page_labels_set",
+                f"/PageLabels añadidos (decimal 1..{extraction.page_count})",
+                details={"scheme": "decimal", "pages": extraction.page_count},
+            )
+
+        if stats.get("links_tagged", 0) > 0:
+            activity.emit(
+                job_id, "write", "annotations_tagged",
+                f"{stats['links_tagged']} enlace(s) etiquetados como /Link",
+                details={"links": stats["links_tagged"]},
+            )
+
+        if stats.get("fields_tagged", 0) > 0:
+            activity.emit(
+                job_id, "write", "form_fields_tagged",
+                f"{stats['fields_tagged']} campo(s) de formulario etiquetados",
+                details={"fields": stats["fields_tagged"]},
+            )
+
+        if stats.get("abbreviations_expanded", 0) > 0:
+            activity.emit(
+                job_id, "write", "abbreviations_expanded",
+                f"{stats['abbreviations_expanded']} abreviatura(s) expandidas (/E)",
+                details={"count": stats["abbreviations_expanded"]},
+            )
+
         activity.emit(
             job_id, "write", "pdf_written",
             f"PDF accesible escrito ({stats.get('struct_elems', 0)} StructElems, "
@@ -428,6 +457,29 @@ class AccessibilityPipeline:
         after_score = self.score_calc.calculate_after(validation)
         changes = writer.get_applied_changes()
         remaining = validation.get_remaining_issues()
+
+        try:
+            scan = scan_pdf(str(accessible_pdf))
+            remaining.extend(scan.all)
+            if scan.font_issues:
+                activity.emit(
+                    job_id, "validate", "font_issues_detected",
+                    f"{len(scan.font_issues)} fuente(s) sin /ToUnicode",
+                    level="warn",
+                    details={"count": len(scan.font_issues)},
+                )
+            if scan.contrast_issues:
+                activity.emit(
+                    job_id, "validate", "contrast_unverifiable",
+                    (
+                        f"{scan.contrast_issues[0].count} página(s) con contraste "
+                        f"no verificable"
+                    ),
+                    level="warn",
+                    details={"pages": scan.contrast_issues[0].pages_affected},
+                )
+        except Exception as e:
+            log.warning("issue_scan_failed", error=str(e))
 
         activity.emit(
             job_id, "report", "report_generated",

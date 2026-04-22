@@ -6,16 +6,24 @@ import { LiveActivityPanel } from "@/components/LiveActivityPanel"
 import {
   downloadUrl,
   fetchReport,
+  reportHtmlUrl,
+  reportJsonUrl,
   type BlockChangeEntry,
+  type ChangeSummaryRow,
+  type EnrichedIssue,
+  type NarrativeSection,
+  type NarrativeStep,
   type RemediationReport,
 } from "@/lib/api"
 
-type Tab = "summary" | "by-page" | "by-criterion" | "activity"
+type Tab = "narrative" | "summary" | "by-page" | "by-criterion" | "glossary" | "activity"
 
 const TAB_LABEL: Record<Tab, string> = {
-  summary: "Resumen",
+  narrative: "Qué hicimos y por qué",
+  summary: "Resumen de cambios",
   "by-page": "Por página",
   "by-criterion": "Por criterio",
+  glossary: "Glosario",
   activity: "Log de actividad",
 }
 
@@ -24,7 +32,7 @@ export default function ResultsPage() {
   const jobId = params?.jobId ?? ""
   const [report, setReport] = useState<RemediationReport | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [tab, setTab] = useState<Tab>("summary")
+  const [tab, setTab] = useState<Tab>("narrative")
 
   useEffect(() => {
     if (!jobId) return
@@ -99,11 +107,19 @@ export default function ResultsPage() {
             Descargar PDF accesible
           </a>
           <a
-            href={`/api/v1/jobs/${jobId}/report`}
+            href={reportJsonUrl(jobId)}
             className="inline-flex items-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
-            download={`reporte-${jobId}.json`}
+            download
           >
             Descargar reporte (JSON)
+          </a>
+          <a
+            href={reportHtmlUrl(jobId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-700 ring-1 ring-slate-300 hover:bg-slate-100"
+          >
+            Ver reporte (HTML)
           </a>
           <a
             href="/"
@@ -113,8 +129,8 @@ export default function ResultsPage() {
           </a>
         </div>
 
-        <div className="mt-10 border-b border-slate-200" role="tablist">
-          {(["summary", "by-page", "by-criterion", "activity"] as Tab[]).map(
+        <div className="mt-10 flex flex-wrap border-b border-slate-200" role="tablist">
+          {(["narrative", "summary", "by-page", "by-criterion", "glossary", "activity"] as Tab[]).map(
             (t) => (
               <button
                 key={t}
@@ -135,9 +151,11 @@ export default function ResultsPage() {
         </div>
 
         <div className="mt-6">
+          {tab === "narrative" && <NarrativeTab report={report} />}
           {tab === "summary" && <SummaryTab report={report} />}
           {tab === "by-page" && <ByPageTab report={report} />}
           {tab === "by-criterion" && <ByCriterionTab report={report} />}
+          {tab === "glossary" && <GlossaryTab report={report} />}
           {tab === "activity" && (
             <LiveActivityPanel events={report.activity_log} />
           )}
@@ -147,27 +165,143 @@ export default function ResultsPage() {
   )
 }
 
-function SummaryTab({ report }: { report: RemediationReport }) {
-  const summary = report.changes_summary ?? {}
+function NarrativeTab({ report }: { report: RemediationReport }) {
+  const sections = report.narrative ?? []
+  if (sections.length === 0) {
+    return (
+      <p className="text-sm text-slate-500">
+        No hay narrativa disponible para este documento.
+      </p>
+    )
+  }
   return (
-    <>
-      {Object.keys(summary).length > 0 && (
-        <section>
-          <h2 className="text-lg font-semibold text-slate-900">
-            Cambios aplicados
-          </h2>
-          <ul className="mt-3 grid gap-2 text-sm text-slate-700 sm:grid-cols-2">
-            {Object.entries(summary).map(([type, count]) => (
-              <li
-                key={type}
-                className="flex justify-between rounded-lg bg-white px-3 py-2 ring-1 ring-slate-200"
-              >
-                <span>{formatChangeType(type)}</span>
-                <span className="font-semibold">{count}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+    <div className="space-y-8">
+      {sections.map((s, i) => (
+        <NarrativeBlock key={i} section={s} />
+      ))}
+    </div>
+  )
+}
+
+function NarrativeBlock({ section }: { section: NarrativeSection }) {
+  return (
+    <section>
+      <h2 className="text-lg font-semibold text-slate-900">{section.heading}</h2>
+      <div className="mt-2 space-y-2 text-sm text-slate-700">
+        {section.paragraphs?.map((p, i) => (
+          <p key={i}>{p}</p>
+        ))}
+      </div>
+
+      {section.items && section.items.length > 0 && (
+        <ul className="mt-3 space-y-2 text-sm">
+          {section.items.map((item, i) => (
+            <NarrativeItem key={i} item={item} />
+          ))}
+        </ul>
+      )}
+
+      {section.steps && section.steps.length > 0 && (
+        <ol className="mt-4 space-y-3">
+          {section.steps.map((step) => (
+            <StepCard key={step.number} step={step} />
+          ))}
+        </ol>
+      )}
+    </section>
+  )
+}
+
+function NarrativeItem({ item }: { item: string | Record<string, unknown> }) {
+  if (typeof item === "string") {
+    return <li className="text-slate-700">{item}</li>
+  }
+  const obj = item as Partial<EnrichedIssue>
+  return (
+    <li className="rounded-lg bg-amber-50 p-3 ring-1 ring-amber-200">
+      <div className="flex flex-wrap items-center gap-2">
+        <strong className="text-amber-900">
+          {obj.criterion_name
+            ? `${obj.criterion} · ${obj.criterion_name}`
+            : obj.criterion ?? "—"}
+        </strong>
+        {obj.criterion_level && (
+          <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
+            WCAG {obj.criterion_level}
+          </span>
+        )}
+        {obj.severity && (
+          <span className="text-xs text-amber-800">{obj.severity}</span>
+        )}
+        {obj.count != null && (
+          <span className="text-xs text-amber-800">· {obj.count} ocurrencia(s)</span>
+        )}
+      </div>
+      <p className="mt-1 text-sm text-amber-900">{obj.description}</p>
+      {obj.hint && (
+        <div className="mt-2 rounded bg-white/60 p-2 text-xs text-amber-900">
+          <strong>Cómo revisar: </strong>{obj.hint}
+        </div>
+      )}
+    </li>
+  )
+}
+
+function StepCard({ step }: { step: NarrativeStep }) {
+  return (
+    <li className="rounded-xl border-l-4 border-blue-500 bg-white p-4 ring-1 ring-slate-200">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-slate-900">
+          {step.number}. {step.title}
+        </span>
+        {step.wcag && (
+          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+            WCAG {step.wcag}
+          </span>
+        )}
+        {step.pdfua && (
+          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800">
+            PDF/UA §{step.pdfua}
+          </span>
+        )}
+      </div>
+      {step.what && (
+        <p className="mt-2 text-sm text-slate-700">
+          <strong className="text-slate-500">Qué hicimos: </strong>{step.what}
+        </p>
+      )}
+      {step.why && (
+        <p className="mt-1 text-sm text-slate-700">
+          <strong className="text-slate-500">Por qué: </strong>{step.why}
+        </p>
+      )}
+      {step.impact && (
+        <p className="mt-1 text-sm text-slate-700">
+          <strong className="text-slate-500">Impacto: </strong>{step.impact}
+        </p>
+      )}
+      {step.examples && step.examples.length > 0 && (
+        <ul className="mt-2 list-disc space-y-0.5 pl-5 text-xs text-slate-600">
+          {step.examples.map((ex, i) => (
+            <li key={i}>{ex}</li>
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+function SummaryTab({ report }: { report: RemediationReport }) {
+  const rows: ChangeSummaryRow[] = useMemo(() => {
+    return report.changes_summary_detailed ?? []
+  }, [report])
+
+  return (
+    <div className="space-y-4">
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-500">Sin cambios registrados.</p>
+      ) : (
+        rows.map((row) => <SummaryRow key={row.change_type} row={row} />)
       )}
 
       {report.remaining_issues.length > 0 && (
@@ -177,25 +311,102 @@ function SummaryTab({ report }: { report: RemediationReport }) {
           </h2>
           <ul className="mt-3 space-y-2">
             {report.remaining_issues.map((issue, idx) => (
-              <li
-                key={idx}
-                className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200"
-              >
-                <strong className="block font-semibold">
-                  {(issue.criterion || "—")} ({issue.severity})
-                </strong>
-                <p>{issue.description}</p>
-                {issue.count != null && (
-                  <p className="text-xs text-amber-800">
-                    {issue.count} ocurrencia(s)
-                  </p>
-                )}
-              </li>
+              <IssueCard key={idx} issue={issue} />
             ))}
           </ul>
         </section>
       )}
-    </>
+    </div>
+  )
+}
+
+function SummaryRow({ row }: { row: ChangeSummaryRow }) {
+  return (
+    <details className="rounded-xl bg-white p-4 ring-1 ring-slate-200">
+      <summary className="cursor-pointer text-sm">
+        <span className="font-semibold text-slate-900">{row.title}</span>
+        <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-700">
+          ×{row.count}
+        </span>
+        {row.wcag && (
+          <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+            WCAG {row.wcag}
+          </span>
+        )}
+        {row.pdfua && (
+          <span className="ml-1 rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800">
+            PDF/UA §{row.pdfua}
+          </span>
+        )}
+      </summary>
+      <div className="mt-3 space-y-1 text-sm text-slate-700">
+        {row.what && (
+          <p><strong className="text-slate-500">Qué: </strong>{row.what}</p>
+        )}
+        {row.why && (
+          <p><strong className="text-slate-500">Por qué: </strong>{row.why}</p>
+        )}
+        {row.impact && (
+          <p><strong className="text-slate-500">Impacto: </strong>{row.impact}</p>
+        )}
+      </div>
+      {row.examples && row.examples.length > 0 && (
+        <div className="mt-3">
+          <strong className="text-xs uppercase tracking-wide text-slate-500">
+            Ejemplos
+          </strong>
+          <ul className="mt-1 space-y-1 text-xs text-slate-600">
+            {row.examples.map((ex, i) => (
+              <li key={i}>
+                {ex.page != null && <>pág. {ex.page} — </>}
+                <span className="text-slate-400 line-through">{ex.before ?? "—"}</span>
+                {" → "}
+                <span className="text-slate-800">{ex.after ?? "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </details>
+  )
+}
+
+function IssueCard({ issue }: { issue: EnrichedIssue }) {
+  return (
+    <li className="rounded-lg bg-amber-50 p-3 ring-1 ring-amber-200">
+      <div className="flex flex-wrap items-center gap-2">
+        <strong className="text-amber-900">
+          {issue.criterion_name
+            ? `${issue.criterion} · ${issue.criterion_name}`
+            : issue.criterion ?? "—"}
+        </strong>
+        {issue.criterion_level && (
+          <span className="rounded bg-amber-200 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900">
+            WCAG {issue.criterion_level}
+          </span>
+        )}
+        <span className="text-xs text-amber-800">({issue.severity})</span>
+      </div>
+      <p className="mt-1 text-sm text-amber-900">{issue.description}</p>
+      {issue.count != null && (
+        <p className="text-xs text-amber-800">{issue.count} ocurrencia(s)</p>
+      )}
+      {issue.criterion_plain && (
+        <p className="mt-2 text-xs text-amber-900">
+          <strong>Qué significa: </strong>{issue.criterion_plain}
+        </p>
+      )}
+      {issue.pdfua_plain && (
+        <p className="mt-1 text-xs text-amber-900">
+          <strong>Regla PDF/UA: </strong>{issue.pdfua_plain}
+        </p>
+      )}
+      {issue.hint && (
+        <div className="mt-2 rounded bg-white/60 p-2 text-xs text-amber-900">
+          <strong>Cómo revisarlo: </strong>{issue.hint}
+        </div>
+      )}
+    </li>
   )
 }
 
@@ -285,7 +496,7 @@ function ByPageTab({ report }: { report: RemediationReport }) {
               <summary className="cursor-pointer px-4 py-2 text-sm font-semibold text-slate-900">
                 Página {page} ({visible.length} cambios)
               </summary>
-              <ul className="divide-y divide-slate-100 text-xs">
+              <ul className="divide-y divide-slate-100">
                 {visible.map((c, idx) => (
                   <ChangeRow key={`${c.block_id}-${idx}`} change={c} />
                 ))}
@@ -364,23 +575,99 @@ function ByCriterionTab({ report }: { report: RemediationReport }) {
   )
 }
 
+function GlossaryTab({ report }: { report: RemediationReport }) {
+  const g = report.glossary
+  if (!g || (g.wcag.length === 0 && g.pdfua.length === 0)) {
+    return (
+      <p className="text-sm text-slate-500">
+        No se usaron criterios o reglas en este documento.
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-8">
+      {g.wcag.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Criterios WCAG mencionados
+          </h2>
+          <ul className="mt-3 space-y-3">
+            {g.wcag.map((c) => (
+              <li key={c.code} className="rounded-xl bg-white p-4 ring-1 ring-slate-200">
+                <div className="flex flex-wrap items-center gap-2">
+                  <strong className="text-slate-900">{c.code} · {c.name}</strong>
+                  {c.level && (
+                    <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+                      Nivel {c.level}
+                    </span>
+                  )}
+                </div>
+                <p className="mt-2 text-sm text-slate-700">{c.plain}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {g.pdfua.length > 0 && (
+        <section>
+          <h2 className="text-lg font-semibold text-slate-900">
+            Reglas PDF/UA-1 mencionadas
+          </h2>
+          <ul className="mt-3 space-y-3">
+            {g.pdfua.map((r) => (
+              <li key={r.rule} className="rounded-xl bg-white p-4 ring-1 ring-slate-200">
+                <strong className="text-slate-900">§{r.rule}</strong>
+                <p className="mt-2 text-sm text-slate-700">{r.plain}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+    </div>
+  )
+}
+
 function ChangeRow({ change }: { change: BlockChangeEntry }) {
   const confidence = change.confidence ?? 1
   const lowConfidence = confidence < 0.7
+  const exp = change.explanation
   return (
     <li
-      className={`grid grid-cols-[6rem_1fr_1fr] gap-3 px-4 py-2 ${
-        lowConfidence ? "bg-amber-50" : ""
-      }`}
+      className={`px-4 py-3 ${lowConfidence ? "bg-amber-50" : ""}`}
     >
-      <div className="text-slate-600">
-        <div className="font-semibold">{change.change_type}</div>
-        <div className="text-[10px] text-slate-400">
-          {change.criterion ?? "—"} · conf {confidence.toFixed(2)}
-        </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-slate-800">
+          {exp?.title ?? formatChangeType(change.change_type)}
+        </span>
+        {change.criterion && (
+          <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-800">
+            WCAG {change.criterion}
+          </span>
+        )}
+        {change.pdfua_rule && (
+          <span className="rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-semibold text-purple-800">
+            PDF/UA §{change.pdfua_rule}
+          </span>
+        )}
+        <span className="text-[10px] text-slate-400">
+          conf {confidence.toFixed(2)}
+        </span>
       </div>
-      <div className="text-slate-500 line-through">{change.before ?? "—"}</div>
-      <div className="text-slate-800">{change.after ?? "—"}</div>
+      <div className="mt-1 text-xs">
+        <span className="text-slate-400 line-through">{change.before ?? "—"}</span>
+        {" → "}
+        <span className="text-slate-800">{change.after ?? "—"}</span>
+      </div>
+      {exp?.why && (
+        <p className="mt-1 text-xs text-slate-600">
+          <strong className="text-slate-500">Por qué: </strong>{exp.why}
+        </p>
+      )}
+      {exp?.impact && (
+        <p className="mt-0.5 text-xs text-slate-600">
+          <strong className="text-slate-500">Impacto: </strong>{exp.impact}
+        </p>
+      )}
     </li>
   )
 }
